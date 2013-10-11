@@ -83,15 +83,28 @@ def freeze(filename, library, make_args=None):
 
 
 if __name__ == '__main__':
-    import sys
+    def fail(message):
+        print(__doc__)
+        print(message)
+        sys.exit()
     
-    try: script_file = sys.argv[1]
-    except: raise Exception('No script specified')
+    try:
+        script_file = sys.argv[1]
+        assert os.path.exists(script_file)
+    except IndexError:
+        fail('ERROR: No script specified')
+    except AssertionError:
+        fail('ERROR: Script not found')
 
-    try: lib_path = sys.argv[2]
-    except: raise Exception('Path to Python runtime not specified')
+    try:
+        lib_path = sys.argv[2]
+        assert os.path.exists(lib_path)
+    except IndexError:
+        fail('ERROR: Path to Python runtime not specified')
+    except AssertionError:
+        fail('ERROR: Python runtime not found')
 
     try: make_args = sys.argv[3:]
-    except: make_args = []
+    except IndexError: make_args = []
 
     freeze(script_file, lib_path, make_args=make_args)
