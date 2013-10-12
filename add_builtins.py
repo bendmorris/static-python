@@ -1,6 +1,13 @@
 #!/usr/bin/env python
 '''Add a set of modules to the list of static Python builtins.
 
+This will modify the Modules/Setup file, which is created by the Static.make 
+Makefile. When running `make -f Static.make`, this script will be run 
+automatically using any arguments passed to that Makefile. If you want to add 
+modules manually, you can run `make -f Static.make setup` which will build 
+Modules/Setup and allow you to edit it or run this script one or more times. 
+When finished, run `make -f Static.make` to build the static interpreter.
+
 Usage: python add_builtins.py [-s /path/to/script] [module_name] ...
 '''
 from modulefinder import ModuleFinder
@@ -13,7 +20,6 @@ import shutil
 import types
 import importlib
 from Cython.Build import cythonize
-import Cython
 
 
 # module definition lines in Modules/Setup look like this
@@ -22,14 +28,17 @@ module_def = re.compile('^[A-Za-z_\.]+ .+\.c')
 extra_module_dir = op.join('Modules', 'extras')
 if not op.exists(extra_module_dir):
     os.makedirs(extra_module_dir)
-# file endings that can be compiled by cython
+# file endings that can be cythonized
+cythonizeable_exts = ('.py', '.pyx')
+# file endings that can be compiled
 compileable_exts = ('.c', '.cpp', 'module.c', 'module.cpp')
 
-def add_builtins(names, script=None, exclude=None, path=None, auto_add_deps=False, src_dirs=None):
+def add_builtins(names, script=None, exclude=None, path=None, 
+                 auto_add_deps=False, src_dirs=None, test=False):
     if path is None:
-        paths = ['lib'] + sys.path
+        paths = ['Lib'] + sys.path
     elif isinstance(path, basestring):
-        paths = [path, 'lib'] + sys.path
+        paths = [path, 'Lib'] + sys.path
     else:
         paths = path
         
@@ -162,7 +171,8 @@ def add_builtins(names, script=None, exclude=None, path=None, auto_add_deps=Fals
                         add = add_module(name, added, paths, src_dirs)
                         if add: new_lines += add
                     except Exception as e:
-                        print(e)
+                        print('Failed:', e)
+                        #raise
                     
                     print('done.')
                 
@@ -197,12 +207,16 @@ def add_module(name, added, paths, src_dirs, module_path=None):
     if not module_path: 
         try: module_path = importlib.import_module(name).__file__
         except: return
+    
+    if op.basename(module_path).startswith('__init__'):
+        pkg = True
         
     # if it's a .pyc file, hope the original python source is right next to it!
     if module_path.endswith('.pyc'):
         if op.exists(module_path[:-1]):
             module_path = module_path[:-1]
         else:
+            # TODO: this could possibly be handled by unpyclib, etc.
             raise Exception('Lone .pyc file %s' % module_path)
         
     module_dir, module_file = op.split(module_path)
@@ -214,9 +228,8 @@ def add_module(name, added, paths, src_dirs, module_path=None):
         if not op.exists(dest_dir): os.makedirs(dest_dir)
     
     
-    # if it's a shared library, try to find the original C or C++ 
-    # source file to compile into a static library; otherwise, 
-    # there's nothing we can do here
+    # if it's a shared library, try to find the original C or C++ source file to 
+    # compile into a static library; otherwise, there's nothing we can do here
     if module_file.endswith('.so'):
         done = False
         module_dirs = []
@@ -250,8 +263,8 @@ def add_module(name, added, paths, src_dirs, module_path=None):
             if done: break
         
         if not any([module_file.endswith(ext) for ext in compileable_exts]):
-            #raise Exception("Couldn't find C source file for %s" % module_file)
-            return
+            raise Exception("Couldn't find C source file for %s" % module_file)
+            #return
             
         module_path = op.join(module_dir, module_file)
         
@@ -269,7 +282,7 @@ def add_module(name, added, paths, src_dirs, module_path=None):
             
             
     # if the file ends in .py or .pyx, try to compile with Cython
-    if any([module_file.endswith(x) for x in ('.py', '.pyx')]):
+    if any([module_file.endswith(x) for x in cythonizeable_exts]):
         dest_file = '.'.join(dest_file.split('.')[:-1]) + '.c'
         
         if op.exists(op.join(dest_dir, dest_file)):
@@ -282,7 +295,6 @@ def add_module(name, added, paths, src_dirs, module_path=None):
                 if pkg:
                     # correct module name in Cython-generated C file
                     wrong_name = '.'.join(dest_file.split('.')[:-1])
-                    print wrong_name, name, dest_path
                     
                     with open(dest_path, 'r') as input_file:
                         with open(dest_path + '2', 'w') as output_file:
@@ -336,6 +348,8 @@ if __name__ == '__main__':
                         help='when adding a module, automatically add all of its dependencies')
     parser.add_argument('--src', nargs='?', default=None,
                         help='list of source package locations for shared libraries, e.g. `pkg1:/path/to/src,pkg2:/path/to/src`')
+    parser.add_argument('-t', '--test', action='store_true',
+                        help="don't actually add the modules right now, just output their names")
                         
     args = parser.parse_args()
     
@@ -348,5 +362,6 @@ if __name__ == '__main__':
                  exclude=args.exclude.split(',') if args.exclude else None, 
                  path=args.path,
                  auto_add_deps=args.deps,
-                 src_dirs=src_dirs
+                 src_dirs=src_dirs,
+                 test=args.test
                  )
